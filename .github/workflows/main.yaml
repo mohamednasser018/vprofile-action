@@ -51,6 +51,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+
   BUILD_AND_PUBLISH:
     needs: Testing
     runs-on: ubuntu-latest
@@ -70,6 +71,7 @@ jobs:
          daemon_off: false
          dockerfile: ./Dockerfile
          context: ./           
+       
          
   DEPLOY_TO_EKS:
     needs: BUILD_AND_PUBLISH
