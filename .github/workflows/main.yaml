@@ -33,7 +33,7 @@ jobs:
       - name: SonarQube scan
         run: sonar-scanner
            -Dsonar.host.url=${{ secrets.SONAR_URL }}
-           -Dsonar.login=${{ secrets.SONAR_TOKENS }} 
+           -Dsonar.login=${{ secrets.SONAR_TOKEN }} 
            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} 
            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }} 
            -Dsonar.sources=src/
@@ -49,8 +49,7 @@ jobs:
         # Force to fail step after specific time.
         timeout-minutes: 5
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKENS }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_URL }} #optional
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   BUILD_AND_PUBLISH:
     needs: Testing
@@ -70,41 +69,37 @@ jobs:
          tags: latest,${{ github.run_number }}
          daemon_off: false
          dockerfile: ./Dockerfile
-         context: ./
-
+         context: ./           
   DEPLOY_TO_EKS:
     needs: BUILD_AND_PUBLISH
     runs-on: ubuntu-latest
     steps:
-      
       - name: Code checkout
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}      
-         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-         aws-region: ${{ env.AWS_REGION }}
- 
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Get kube config file
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER }}
 
-      - name: Print config file  
+      - name: Print config file
         run: cat ~/.kube/config
 
-      - name: Login to ECR
-        run: kubectl create secret docker-registry regycred --docker-server=${{ secrets.REGISTRY }} --docker-username=AWS --docker-password=$(aws ecr get-login-password)
-        
-      - name: Deploy Helm
-        uses: bitovi/github-actions-deploy-eks-helm@v1.2.8
-        with:
-         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}      
-         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-         aws-region: ${{ env.AWS_REGION }}
-         cluster-name: ${{ env.EKS_CLUSTER }}  
-         #config-files: .github/values/dev.yaml
-         chart-path: helm/vprofilecharts
-         namespace: default
-         values: appimage=${{ secrets.REGISTRY }}/${{ env.ECR_REPOSITORY}},apptag=${{ github.run_number }}
-         name: vprofile-stack
+      - name: Create Docker registry secret manifest
+        run: |
+          echo "
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: regycred
+          data:
+            .dockerconfigjson: $(echo "{\"auths\":{\"${{ secrets.REGISTRY }}\":{\"username\":\"AWS\",\"password\":\"$(aws ecr get-login-password --region ${{ env.AWS_REGION }})\"}}}" | base64 -w0)
+          type: kubernetes.io/dockerconfigjson
+          " > regycred.yaml
+      - name: Apply Docker registry secret
+        run: kubectl apply -f regycred.yaml
